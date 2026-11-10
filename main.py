@@ -269,31 +269,33 @@ st.markdown(
     .stApp { background: radial-gradient(ellipse at 12% 0%, #142c2b 0%, #0c141c 40%, #080d13 100%); color: #e8f1f3; }
     [data-testid="stHeader"] { background: #080d13; }
     [data-testid="stToolbar"] { right: 1rem; }
-    .block-container { max-width: 1260px; padding-top: 1.6rem; }
+    .block-container { max-width: 1260px; padding: 1rem 0.7rem 1.5rem; }
     h1, h2, h3, p, label { color: #e8f1f3; }
     [data-testid="stCaptionContainer"] p { color: #a4b7bc; }
     .hero {
-        padding: 1.1rem 1.5rem; border-radius: 22px; color: white; min-height: 120px;
+        padding: 1rem 1rem; border-radius: 22px; color: white; min-height: unset;
         background: linear-gradient(115deg, #123b37, #15584c 58%, #18765f);
         border: 1px solid #347a67; box-shadow: 0 14px 36px #0000003a;
-        margin-bottom: 1.2rem; display: flex; flex-direction: column; justify-content: center;
+        margin-bottom: 0.9rem; display: flex; flex-direction: column; justify-content: center;
     }
-    .hero h1 { margin: 0; font-size: 2.3rem; color: #f5fffb; }
-    .hero p { margin: .4rem 0 0; color: #c1e8d9; font-size: 1.02rem; }
+    .hero h1 { margin: 0; font-size: 1.8rem; color: #f5fffb; }
+    .hero p { margin: .4rem 0 0; color: #c1e8d9; font-size: 0.92rem; }
     .metric-card {
         background: linear-gradient(145deg, #16242d, #111b23); border: 1px solid #293a43;
-        border-radius: 18px; padding: 1rem 1.15rem; box-shadow: 0 8px 22px #00000024;
-        min-height: 102px;
+        border-radius: 18px; padding: 0.9rem 0.95rem; box-shadow: 0 8px 22px #00000024;
+        min-height: 0;
+        margin-bottom: 0.75rem;
     }
-    .metric-label { color: #a4b7bc; font-size: .85rem; font-weight: 600; }
-    .metric-value { color: #f4fbf8; font-size: 1.45rem; font-weight: 750; margin-top: .2rem; }
+    .metric-label { color: #a4b7bc; font-size: .8rem; font-weight: 600; }
+    .metric-value { color: #f4fbf8; font-size: 1.2rem; font-weight: 750; margin-top: .2rem; }
     .chart-card {
         background: linear-gradient(145deg, #131f27, #101820); border: 1px solid #293a43;
-        border-radius: 20px; padding: 1.15rem 1.25rem; box-shadow: 0 8px 22px #00000024;
+        border-radius: 20px; padding: 0.8rem; box-shadow: 0 8px 22px #00000024;
         height: 100%;
+        margin-bottom: 0.75rem;
     }
-    .chart-title { color: #edf6f2; font-size: 1.08rem; font-weight: 700; margin-bottom: .15rem; }
-    .chart-subtitle { color: #9eb1b6; font-size: .82rem; margin-bottom: .6rem; }
+    .chart-title { color: #edf6f2; font-size: 1rem; font-weight: 700; margin-bottom: .15rem; }
+    .chart-subtitle { color: #9eb1b6; font-size: .76rem; margin-bottom: .6rem; }
     .chart-card svg { display: block; width: 100%; height: auto; overflow: visible; }
     .chart-card .grid { stroke: #2a3941; stroke-width: 1; }
     .chart-card .axis { fill: #8fa4aa; font-size: 11px; }
@@ -307,10 +309,10 @@ st.markdown(
     table.leaderboard { width: 100%; border-collapse: collapse; }
     table.leaderboard th {
         background: #1b2b32; color: #bfe9d7; font-size: .84rem;
-        text-align: left; padding: .8rem 1rem; white-space: nowrap;
+        text-align: left; padding: .7rem .8rem; white-space: nowrap;
     }
     table.leaderboard td {
-        color: #dce8e7; padding: .75rem 1rem; border-top: 1px solid #25343c;
+        color: #dce8e7; padding: .7rem .8rem; border-top: 1px solid #25343c;
         white-space: nowrap;
     }
     table.leaderboard tr:nth-child(even) td { background: #142028; }
@@ -319,6 +321,45 @@ st.markdown(
     div[data-testid="stTabs"] button[aria-selected="true"] { color: #57d9a8; }
     div[data-testid="stTabs"] [data-baseweb="tab-highlight"] { background: #57d9a8; }
     hr { border-color: #293a43; }
+    [data-testid="stHorizontalBlock"] { display: block !important; width: 100% !important; }
+    [data-testid="stHorizontalBlock"] > div {
+        width: 100% !important; max-width: 100% !important;
+        padding-right: 0 !important; padding-left: 0 !important;
+        margin-bottom: 0.7rem;
+        text-align: center;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    [data-testid="stImage"] { display: block; max-width: 120px; margin: 0 auto 0.5rem; }
+    @media (min-width: 768px) {
+        .block-container { padding-top: 1.6rem; padding-left: 1rem; padding-right: 1rem; }
+        .hero { padding: 1.1rem 1.5rem; min-height: 120px; margin-bottom: 1.2rem; }
+        .hero h1 { font-size: 2.3rem; }
+        .hero p { font-size: 1.02rem; }
+        .metric-card { min-height: 102px; margin-bottom: 0; }
+        .metric-value { font-size: 1.45rem; }
+        .chart-card { padding: 1.15rem 1.25rem; margin-bottom: 0; }
+        .chart-title { font-size: 1.08rem; }
+        .chart-subtitle { font-size: .82rem; }
+        [data-testid="stHorizontalBlock"] {
+            display: flex !important;
+            width: 100% !important;
+        }
+        [data-testid="stHorizontalBlock"] > div {
+            width: auto !important;
+            max-width: none !important;
+            padding-right: 0.5rem !important;
+            padding-left: 0.5rem !important;
+            margin-bottom: 0;
+            text-align: left;
+            display: block;
+            justify-content: flex-start;
+            align-items: stretch;
+        }
+        table.leaderboard th, table.leaderboard td { padding: .8rem 1rem; white-space: nowrap; }
+        [data-testid="stImage"] { display: block; max-width: 170px; margin: 0; }
+    }
     </style>
     """,
     unsafe_allow_html=True,
