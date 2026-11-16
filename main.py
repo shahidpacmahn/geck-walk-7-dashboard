@@ -9,8 +9,11 @@ from openpyxl.utils.datetime import from_excel
 
 WORKBOOK = Path(__file__).with_name("week1group.xlsx")
 LOGO = Path(__file__).with_name("logo.jpeg")
-WEEK_DATES = (date(2026, 11, 6), date(2026, 11, 7), date(2026, 11, 8))
-DATE_LABELS = ("06 Nov", "07 Nov", "08 Nov")
+WEEK_DATES = (
+    date(2026, 11, 6), date(2026, 11, 7), date(2026, 11, 8),
+    date(2026, 11, 13), date(2026, 11, 14), date(2026, 11, 15),
+)
+DATE_LABELS = ("06 Nov", "07 Nov", "08 Nov", "13 Nov", "14 Nov", "15 Nov")
 STEP_CAP = 15_000
 TEAM_EMOJIS = {
     "BO10": "🦅",
@@ -60,18 +63,95 @@ def number_or_zero(value):
         return 0
 
 
+def summary_number(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def read_group_summary(sheet, week_dates):
+    rows = list(sheet.iter_rows(values_only=True))
+    header_index = next(
+        (index for index, row in enumerate(rows) if row and str(row[0]).strip().lower() == "group"),
+        None,
+    )
+    if header_index is None:
+        raise ValueError(f"{sheet.title} is missing its Group header row.")
+    headers = rows[header_index]
+
+    def header_date(value):
+        for token in str(value or "").split():
+            parsed = parse_date_header(token)
+            if parsed in week_dates:
+                return parsed
+        return None
+
+    average_columns = {}
+    points_columns = {}
+    for index, header in enumerate(headers):
+        text = str(header or "").strip().lower()
+        parsed_date = header_date(header)
+        if parsed_date in week_dates and text.startswith("avg "):
+            average_columns[parsed_date] = index
+        if parsed_date in week_dates and text.startswith("points "):
+            points_columns[parsed_date] = index
+
+    missing_averages = [day for day in week_dates if day not in average_columns]
+    missing_points = [day for day in week_dates if day not in points_columns]
+    if missing_averages or missing_points:
+        raise ValueError(f"{sheet.title} is missing daily average or points columns.")
+
+    header_keys = [str(value or "").strip().lower() for value in headers]
+    total_points_column = next(
+        (index for index, value in enumerate(header_keys) if "total points" in value), None
+    )
+    average_steps_column = next(
+        (index for index, value in enumerate(header_keys) if "avg steps" in value and "capped" not in value),
+        None,
+    )
+    capped_average_column = next(
+        (index for index, value in enumerate(header_keys) if "capped" in value and "avg" in value),
+        None,
+    )
+    if total_points_column is None or average_steps_column is None or capped_average_column is None:
+        raise ValueError(f"{sheet.title} is missing a weekly total or average column.")
+    disqualified_column = next(
+        (index for index, value in enumerate(header_keys) if "disqualified" in value), None
+    )
+
+    summaries = {}
+    for row in rows[header_index + 1:]:
+        code = normalize_code(row[0] if row else None)
+        if not code:
+            continue
+        if code in summaries:
+            raise ValueError(f"Duplicate group code in {sheet.title}: {code}")
+        summaries[code] = {
+            "daily_averages": [summary_number(row[average_columns[day]]) for day in week_dates],
+            "daily_points": [summary_number(row[points_columns[day]]) for day in week_dates],
+            "points": summary_number(row[total_points_column]),
+            "average_steps": summary_number(row[average_steps_column]),
+            "capped_average": summary_number(row[capped_average_column]),
+            "disqualified": row[disqualified_column] if disqualified_column is not None else None,
+        }
+    return summaries
+
+
 def load_dashboard_data(path):
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
-        member_sheet = workbook.worksheets[0]
-        if "Sheet2" not in workbook.sheetnames:
-            raise ValueError("The workbook is missing the Sheet2 team lookup.")
+        required_sheets = {"Total", "SW1", "SW2", "Sheet2"}
+        missing_sheets = required_sheets - set(workbook.sheetnames)
+        if missing_sheets:
+            raise ValueError("The workbook is missing sheets: " + ", ".join(sorted(missing_sheets)))
+        member_sheet = workbook["Total"]
         team_sheet = workbook["Sheet2"]
 
         member_rows = member_sheet.iter_rows(values_only=True)
         member_headers = next(member_rows, None)
         if not member_headers:
-            raise ValueError("The first worksheet is empty.")
+            raise ValueError("The Total worksheet is empty.")
         member_columns = {
             str(value).strip(): index
             for index, value in enumerate(member_headers)
@@ -81,7 +161,7 @@ def load_dashboard_data(path):
         missing_member_columns = required_member_columns - member_columns.keys()
         if missing_member_columns:
             raise ValueError(
-                "The first worksheet is missing required columns: "
+                "The Total worksheet is missing required columns: "
                 + ", ".join(sorted(missing_member_columns))
             )
 
@@ -93,7 +173,7 @@ def load_dashboard_data(path):
         missing_dates = [day.strftime("%d/%m/%Y") for day in WEEK_DATES if day not in date_columns]
         if missing_dates:
             raise ValueError(
-                "Could not find these daily step columns in the first worksheet: "
+                "Could not find these daily step columns in the Total worksheet: "
                 + ", ".join(missing_dates)
             )
 
@@ -104,8 +184,12 @@ def load_dashboard_data(path):
             for index, value in enumerate(team_headers or ())
             if value is not None
         }
-        required_team_columns = {"Code", "Name", "Points"}
-        missing_team_columns = required_team_columns - team_columns.keys()
+        normalized_team_columns = {
+            str(value).strip().lower().replace(" ", ""): index
+            for value, index in team_columns.items()
+        }
+        required_team_columns = {"code", "name", "week1", "week2", "total"}
+        missing_team_columns = required_team_columns - normalized_team_columns.keys()
         if missing_team_columns:
             raise ValueError(
                 "Sheet2 is missing required columns: "
@@ -114,21 +198,36 @@ def load_dashboard_data(path):
 
         teams_by_code = {}
         for row in team_rows:
-            code = normalize_code(row[team_columns["Code"]])
+            code = normalize_code(row[normalized_team_columns["code"]])
             if not code:
                 continue
             if code in teams_by_code:
                 raise ValueError(f"Duplicate team code in Sheet2: {code}")
             try:
-                points = float(row[team_columns["Points"]])
+                week_points = {
+                    1: float(row[normalized_team_columns["week1"]]),
+                    2: float(row[normalized_team_columns["week2"]]),
+                }
+                points = float(row[normalized_team_columns["total"]])
             except (TypeError, ValueError, IndexError):
-                raise ValueError(f"Team {code} must have a numeric points value.") from None
+                raise ValueError(f"Team {code} must have numeric weekly and total points.") from None
             teams_by_code[code] = {
                 "code": code,
-                "name": str(row[team_columns["Name"]] or "").strip(),
+                "name": str(row[normalized_team_columns["name"]] or "").strip(),
                 "points": points,
+                "week_points": week_points,
                 "members": [],
             }
+
+        week_summaries = {
+            1: read_group_summary(workbook["SW1"], WEEK_DATES[:3]),
+            2: read_group_summary(workbook["SW2"], WEEK_DATES[3:]),
+        }
+        for week, summaries in week_summaries.items():
+            for code, summary in summaries.items():
+                if code not in teams_by_code:
+                    raise ValueError(f"Group code {code} from SW{week} is missing in Sheet2.")
+                teams_by_code[code].setdefault("group_summaries", {})[week] = summary
 
         for row in member_rows:
             name = str(row[member_columns["First Name"]] or "").strip()
@@ -136,7 +235,7 @@ def load_dashboard_data(path):
             if not name or not code:
                 continue
             if code not in teams_by_code:
-                raise ValueError(f"Team code {code} from the first worksheet is missing in Sheet2.")
+                raise ValueError(f"Team code {code} from the Total worksheet is missing in Sheet2.")
             steps = [number_or_zero(row[date_columns[day]]) for day in WEEK_DATES]
             member = {
                 "name": name,
@@ -203,8 +302,8 @@ def daily_steps_chart(daily_totals):
             f'<text x="{left-10}" y="{y+4:.1f}" class="axis" text-anchor="end">'
             f'{value/1000:,.0f}k</text>'
         )
-    bar_width = min(112, chart_width / 5)
-    colors = ("#ff9b54", "#2dd4a7", "#70a5ff")
+    bar_width = min(76, chart_width / len(daily_totals) * 0.68)
+    colors = ("#ff9b54", "#2dd4a7", "#70a5ff", "#f07167", "#c792ea", "#f2cc60")
     for index, value in enumerate(daily_totals):
         x = left + chart_width * (index + 0.5) / len(daily_totals) - bar_width / 2
         bar_height = chart_height * value / scale_max
@@ -227,13 +326,13 @@ def team_daily_chart(team_board):
     left, right, top, bottom = 122, 24, 62, 34
     chart_width = width - left - right
     row_height = (height - top - bottom) / max(len(top_teams), 1)
-    colors = ("#ff9b54", "#2dd4a7", "#70a5ff")
+    colors = ("#ff9b54", "#2dd4a7", "#70a5ff", "#f07167", "#c792ea", "#f2cc60")
     pieces = [
         f'<svg viewBox="0 0 {width} {height}" role="img" '
         'aria-label="Capped daily average steps for the top six teams">'
     ]
     for index, label in enumerate(DATE_LABELS):
-        x = left + index * 190
+        x = left + index * 106
         pieces.append(
             f'<rect x="{x}" y="22" width="10" height="10" rx="3" fill="{colors[index]}"/>'
             f'<text x="{x+16}" y="31" class="legend">{label}</text>'
@@ -260,6 +359,49 @@ def team_daily_chart(team_board):
             )
     pieces.append("</svg>")
     return "".join(pieces)
+
+
+def render_week_summary(teams, week):
+    labels = DATE_LABELS[:3] if week == 1 else DATE_LABELS[3:]
+    summaries = [
+        (team, team.get("group_summaries", {}).get(week))
+        for team in teams
+    ]
+    summaries = [(team, summary) for team, summary in summaries if summary is not None]
+    summaries.sort(key=lambda item: (-item[1]["points"], item[0]["code"]))
+    if not summaries:
+        st.warning(f"No group summaries were found for Week {week}.")
+        return
+
+    has_disqualification = any(summary["disqualified"] is not None for _, summary in summaries)
+    headers = [
+        "Rank", "Group",
+        *(f"{label} avg" for label in labels),
+        *(f"{label} pts" for label in labels),
+        "Week points", "3-day avg steps", "Capped 3-day avg",
+    ]
+    if has_disqualification:
+        headers.append("Disqualified")
+
+    rows = []
+    for rank, (team, summary) in enumerate(summaries, start=1):
+        row = [
+            rank,
+            f"{team['emoji']} {team['name']}",
+            *(f"{value:,.0f}" for value in summary["daily_averages"]),
+            *(f"{value:,.0f}" for value in summary["daily_points"]),
+            f"{summary['points']:,.0f}",
+            f"{summary['average_steps']:,.0f}",
+            f"{summary['capped_average']:,.0f}",
+        ]
+        if has_disqualification:
+            row.append(summary["disqualified"] or "")
+        rows.append(row)
+    numeric_columns = tuple(
+        index for index in range(len(headers))
+        if index != 1 and (index != len(headers) - 1 or not has_disqualification)
+    )
+    render_table(headers, rows, numeric_columns)
 
 
 st.set_page_config(page_title="GECK WALK 7.0", page_icon="🚶", layout="wide")
@@ -384,14 +526,13 @@ if not WORKBOOK.exists():
 try:
     teams, walkers = load_dashboard_data(WORKBOOK)
 except (ValueError, KeyError, OSError) as exc:
-    st.error(f"Unable to load the Week 1 workbook: {exc}")
+    st.error(f"Unable to load the walking workbook: {exc}")
     st.stop()
 
 points_board = sorted(teams, key=lambda team: (-team["points"], -team["capped_average"]))
 average_board = sorted(teams, key=lambda team: (-team["capped_average"], -team["points"]))
 walker_board = sorted(walkers, key=lambda member: -member["week_steps"])
 leader = points_board[0]
-best_average = average_board[0]
 daily_totals = [
     sum(member["steps"][day_index] for member in walkers)
     for day_index in range(len(WEEK_DATES))
@@ -401,7 +542,7 @@ average_per_walker_day = sum(daily_totals) / (len(walkers) * len(WEEK_DATES)) if
 
 metric_columns = st.columns(4)
 metrics = [
-    ("👟 Total steps · 3 days", f"{sum(daily_totals):,}"),
+    ("👟 Total steps · 6 days", f"{sum(daily_totals):,}"),
     ("📍 Avg per walker / day", f"{average_per_walker_day:,.0f}"),
     ("🔥 Most active day", f"{DATE_LABELS[best_day_index]} · {daily_totals[best_day_index]:,}"),
     ("🏆 Top team · points", f"{leader['emoji']} {leader['code']} · {leader['points']:,.0f} pts"),
@@ -419,7 +560,7 @@ chart_columns = st.columns([1, 1.15])
 with chart_columns[0]:
     st.markdown(
         '<div class="chart-card"><div class="chart-title">🌍 Steps across the community</div>'
-        '<div class="chart-subtitle">Total recorded steps each day</div>'
+        '<div class="chart-subtitle">Total recorded steps across both weeks</div>'
         f'{daily_steps_chart(daily_totals)}</div>',
         unsafe_allow_html=True,
     )
@@ -432,42 +573,43 @@ with chart_columns[1]:
     )
 
 st.write("")
-tabs = st.tabs(["🏆 Team points", "📊 Team average", "👟 Walker leaderboard"])
+tabs = st.tabs(["🏆 Team points", "📅 Week 1 summary", "📅 Week 2 summary", "👟 Walker leaderboard"])
 
 with tabs[0]:
     st.subheader(f"{leader['emoji']} {leader['name']} is setting the pace!")
-    st.caption("Week 1 team points are taken from the Sheet2 team-code lookup.")
+    st.caption("Weekly and total points use the Sheet2 team score lookup.")
     rows = [
         [
             rank,
             f"{team['emoji']} {team['name']}",
             team["code"],
+            f"{team['week_points'][1]:,.0f}",
+            f"{team['week_points'][2]:,.0f}",
             f"{team['points']:,.0f}",
             team["members_count"],
             f"{team['capped_average']:,.0f} steps",
         ]
         for rank, team in enumerate(points_board, start=1)
     ]
-    render_table(["Rank", "Team", "Code", "Points", "Walkers", "3-day capped avg"], rows, (0, 3, 4, 5))
+    render_table(
+        ["Rank", "Team", "Code", "Week 1", "Week 2", "Total points", "Walkers", "6-day capped avg"],
+        rows,
+        (0, 3, 4, 5, 6, 7),
+    )
 
 with tabs[1]:
-    st.subheader(f"{best_average['emoji']} {best_average['name']} leads on capped average")
-    st.caption("Each walker’s daily steps are capped at 15,000 before averaging across the team.")
-    rows = [
-        [
-            rank,
-            f"{team['emoji']} {team['name']}",
-            team["code"],
-            f"{team['capped_average']:,.0f} steps",
-            *(f"{average:,.0f}" for average in team["daily_averages"]),
-        ]
-        for rank, team in enumerate(average_board, start=1)
-    ]
-    render_table(["Rank", "Team", "Code", "3-day avg", *DATE_LABELS], rows, (0, 3, 4, 5, 6))
+    st.subheader("Week 1 group summary")
+    st.caption("Daily averages, points, and capped averages are read from SW1.")
+    render_week_summary(teams, 1)
 
 with tabs[2]:
+    st.subheader("Week 2 group summary")
+    st.caption("Daily averages and points are read from SW2.")
+    render_week_summary(teams, 2)
+
+with tabs[3]:
     st.subheader("Every step counts")
-    st.caption("Ranked by total uncapped steps across 06, 07, and 08 November.")
+    st.caption("Ranked by total uncapped steps across 06–08 and 13–15 November.")
     rows = [
         [
             rank,
@@ -477,6 +619,6 @@ with tabs[2]:
         ]
         for rank, member in enumerate(walker_board, start=1)
     ]
-    render_table(["Rank", "Walker", "Team", "3-day steps"], rows, (0, 3))
+    render_table(["Rank", "Walker", "Team", "6-day steps"], rows, (0, 3))
 
-st.caption("GECK WALK 7.0 · Week 1 · 06–08 November 2026")
+st.caption("GECK WALK 7.0 · Weeks 1–2 · 06–08 and 13–15 November 2026")
