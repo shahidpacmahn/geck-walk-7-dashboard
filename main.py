@@ -12,8 +12,16 @@ LOGO = Path(__file__).with_name("logo.jpeg")
 WEEK_DATES = (
     date(2026, 11, 6), date(2026, 11, 7), date(2026, 11, 8),
     date(2026, 11, 13), date(2026, 11, 14), date(2026, 11, 15),
+    date(2026, 11, 20), date(2026, 11, 21), date(2026, 11, 22),
 )
-DATE_LABELS = ("06 Nov", "07 Nov", "08 Nov", "13 Nov", "14 Nov", "15 Nov")
+DATE_LABELS = (
+    "06 Nov", "07 Nov", "08 Nov", "13 Nov", "14 Nov", "15 Nov",
+    "20 Nov", "21 Nov", "22 Nov",
+)
+CHART_COLORS = (
+    "#ff9b54", "#2dd4a7", "#70a5ff", "#f07167", "#c792ea",
+    "#f2cc60", "#55c1d9", "#ed78ad", "#a3cf62",
+)
 STEP_CAP = 15_000
 TEAM_EMOJIS = {
     "BO10": "🦅",
@@ -123,7 +131,19 @@ def read_group_summary(sheet, week_dates):
     summaries = {}
     for row in rows[header_index + 1:]:
         code = normalize_code(row[0] if row else None)
-        if not code:
+        if not code or not code.isalnum():
+            continue
+        summary_columns = (
+            *average_columns.values(),
+            *points_columns.values(),
+            total_points_column,
+            average_steps_column,
+            capped_average_column,
+        )
+        if not any(
+            index < len(row) and isinstance(row[index], (int, float))
+            for index in summary_columns
+        ):
             continue
         if code in summaries:
             raise ValueError(f"Duplicate group code in {sheet.title}: {code}")
@@ -141,7 +161,7 @@ def read_group_summary(sheet, week_dates):
 def load_dashboard_data(path):
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
-        required_sheets = {"Total", "SW1", "SW2", "Sheet2"}
+        required_sheets = {"Total", "SW1", "SW2", "SW3", "Sheet2"}
         missing_sheets = required_sheets - set(workbook.sheetnames)
         if missing_sheets:
             raise ValueError("The workbook is missing sheets: " + ", ".join(sorted(missing_sheets)))
@@ -188,7 +208,7 @@ def load_dashboard_data(path):
             str(value).strip().lower().replace(" ", ""): index
             for value, index in team_columns.items()
         }
-        required_team_columns = {"code", "name", "week1", "week2", "total"}
+        required_team_columns = {"code", "name", "week1", "week2", "week3", "total"}
         missing_team_columns = required_team_columns - normalized_team_columns.keys()
         if missing_team_columns:
             raise ValueError(
@@ -207,6 +227,7 @@ def load_dashboard_data(path):
                 week_points = {
                     1: float(row[normalized_team_columns["week1"]]),
                     2: float(row[normalized_team_columns["week2"]]),
+                    3: float(row[normalized_team_columns["week3"]]),
                 }
                 points = float(row[normalized_team_columns["total"]])
             except (TypeError, ValueError, IndexError):
@@ -221,7 +242,8 @@ def load_dashboard_data(path):
 
         week_summaries = {
             1: read_group_summary(workbook["SW1"], WEEK_DATES[:3]),
-            2: read_group_summary(workbook["SW2"], WEEK_DATES[3:]),
+            2: read_group_summary(workbook["SW2"], WEEK_DATES[3:6]),
+            3: read_group_summary(workbook["SW3"], WEEK_DATES[6:]),
         }
         for week, summaries in week_summaries.items():
             for code, summary in summaries.items():
@@ -303,14 +325,13 @@ def daily_steps_chart(daily_totals):
             f'{value/1000:,.0f}k</text>'
         )
     bar_width = min(76, chart_width / len(daily_totals) * 0.68)
-    colors = ("#ff9b54", "#2dd4a7", "#70a5ff", "#f07167", "#c792ea", "#f2cc60")
     for index, value in enumerate(daily_totals):
         x = left + chart_width * (index + 0.5) / len(daily_totals) - bar_width / 2
         bar_height = chart_height * value / scale_max
         y = top + chart_height - bar_height
         pieces.append(
             f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_width:.1f}" height="{bar_height:.1f}" '
-            f'rx="9" fill="{colors[index]}"/>'
+            f'rx="9" fill="{CHART_COLORS[index]}"/>'
             f'<text x="{x+bar_width/2:.1f}" y="{max(top-8, y-10):.1f}" '
             f'class="value" text-anchor="middle">{value/1_000_000:.2f}m</text>'
             f'<text x="{x+bar_width/2:.1f}" y="{height-18}" class="label" '
@@ -322,19 +343,18 @@ def daily_steps_chart(daily_totals):
 
 def team_daily_chart(team_board):
     top_teams = team_board[:6]
-    width, height = 760, 360
+    width, height = 760, 420
     left, right, top, bottom = 122, 24, 62, 34
     chart_width = width - left - right
     row_height = (height - top - bottom) / max(len(top_teams), 1)
-    colors = ("#ff9b54", "#2dd4a7", "#70a5ff", "#f07167", "#c792ea", "#f2cc60")
     pieces = [
         f'<svg viewBox="0 0 {width} {height}" role="img" '
         'aria-label="Capped daily average steps for the top six teams">'
     ]
     for index, label in enumerate(DATE_LABELS):
-        x = left + index * 106
+        x = left + index * chart_width / len(DATE_LABELS)
         pieces.append(
-            f'<rect x="{x}" y="22" width="10" height="10" rx="3" fill="{colors[index]}"/>'
+            f'<rect x="{x:.1f}" y="22" width="10" height="10" rx="3" fill="{CHART_COLORS[index]}"/>'
             f'<text x="{x+16}" y="31" class="legend">{label}</text>'
         )
     for tick in (0, 5000, 10000, 15000):
@@ -351,18 +371,19 @@ def team_daily_chart(team_board):
             f'{escape(team["code"])}</text>'
         )
         for day_index, value in enumerate(team["daily_averages"]):
-            bar_y = center_y - 13 + day_index * 9
+            bar_y = center_y - row_height / 2 + day_index * row_height / len(DATE_LABELS) + 1
             bar_width = chart_width * value / STEP_CAP
             pieces.append(
-                f'<rect x="{left}" y="{bar_y:.1f}" width="{bar_width:.1f}" height="6" '
-                f'rx="3" fill="{colors[day_index]}"/>'
+                f'<rect x="{left}" y="{bar_y:.1f}" width="{bar_width:.1f}" height="4" '
+                f'rx="2" fill="{CHART_COLORS[day_index]}"/>'
             )
     pieces.append("</svg>")
     return "".join(pieces)
 
 
 def render_week_summary(teams, week):
-    labels = DATE_LABELS[:3] if week == 1 else DATE_LABELS[3:]
+    start = (week - 1) * 3
+    labels = DATE_LABELS[start:start + 3]
     summaries = [
         (team, team.get("group_summaries", {}).get(week))
         for team in teams
@@ -542,7 +563,7 @@ average_per_walker_day = sum(daily_totals) / (len(walkers) * len(WEEK_DATES)) if
 
 metric_columns = st.columns(4)
 metrics = [
-    ("👟 Total steps · 6 days", f"{sum(daily_totals):,}"),
+    (f"👟 Total steps · {len(WEEK_DATES)} days", f"{sum(daily_totals):,}"),
     ("📍 Avg per walker / day", f"{average_per_walker_day:,.0f}"),
     ("🔥 Most active day", f"{DATE_LABELS[best_day_index]} · {daily_totals[best_day_index]:,}"),
     ("🏆 Top team · points", f"{leader['emoji']} {leader['code']} · {leader['points']:,.0f} pts"),
@@ -560,7 +581,7 @@ chart_columns = st.columns([1, 1.15])
 with chart_columns[0]:
     st.markdown(
         '<div class="chart-card"><div class="chart-title">🌍 Steps across the community</div>'
-        '<div class="chart-subtitle">Total recorded steps across both weeks</div>'
+        '<div class="chart-subtitle">Total recorded steps across all three weeks</div>'
         f'{daily_steps_chart(daily_totals)}</div>',
         unsafe_allow_html=True,
     )
@@ -573,7 +594,10 @@ with chart_columns[1]:
     )
 
 st.write("")
-tabs = st.tabs(["🏆 Team points", "📅 Week 1 summary", "📅 Week 2 summary", "👟 Walker leaderboard"])
+tabs = st.tabs([
+    "🏆 Team points", "📅 Week 1 summary", "📅 Week 2 summary",
+    "📅 Week 3 summary", "👟 Walker leaderboard",
+])
 
 with tabs[0]:
     st.subheader(f"{leader['emoji']} {leader['name']} is setting the pace!")
@@ -585,6 +609,7 @@ with tabs[0]:
             team["code"],
             f"{team['week_points'][1]:,.0f}",
             f"{team['week_points'][2]:,.0f}",
+            f"{team['week_points'][3]:,.0f}",
             f"{team['points']:,.0f}",
             team["members_count"],
             f"{team['capped_average']:,.0f} steps",
@@ -592,9 +617,12 @@ with tabs[0]:
         for rank, team in enumerate(points_board, start=1)
     ]
     render_table(
-        ["Rank", "Team", "Code", "Week 1", "Week 2", "Total points", "Walkers", "6-day capped avg"],
+        [
+            "Rank", "Team", "Code", "Week 1", "Week 2", "Week 3",
+            "Total points", "Walkers", f"{len(WEEK_DATES)}-day capped avg",
+        ],
         rows,
-        (0, 3, 4, 5, 6, 7),
+        (0, 3, 4, 5, 6, 7, 8),
     )
 
 with tabs[1]:
@@ -608,8 +636,13 @@ with tabs[2]:
     render_week_summary(teams, 2)
 
 with tabs[3]:
+    st.subheader("Week 3 group summary")
+    st.caption("Daily averages and points are read from SW3.")
+    render_week_summary(teams, 3)
+
+with tabs[4]:
     st.subheader("Every step counts")
-    st.caption("Ranked by total uncapped steps across 06–08 and 13–15 November.")
+    st.caption("Ranked by total uncapped steps across 06–08, 13–15, and 20–22 November.")
     rows = [
         [
             rank,
@@ -619,6 +652,6 @@ with tabs[3]:
         ]
         for rank, member in enumerate(walker_board, start=1)
     ]
-    render_table(["Rank", "Walker", "Team", "6-day steps"], rows, (0, 3))
+    render_table(["Rank", "Walker", "Team", f"{len(WEEK_DATES)}-day steps"], rows, (0, 3))
 
-st.caption("GECK WALK 7.0 · Weeks 1–2 · 06–08 and 13–15 November 2026")
+st.caption("GECK WALK 7.0 · Weeks 1–3 · 06–08, 13–15, and 20–22 November 2026")
