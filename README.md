@@ -8,7 +8,7 @@ A sleek, dark-mode leaderboard for the GECK WALK 7.0 challenge — built to surf
 
 - Community-wide step totals across the challenge window
 - Team leaderboard rankings by points and capped average steps
-- Week 1 and Week 2 summary tables
+- Weekly summary tables
 - Daily totals and activity trends
 - Individual walker rankings across all six days
 - A presentation-ready layout with a modern sports-style design
